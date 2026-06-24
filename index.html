@@ -2,145 +2,183 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Brick Game 打磚塊</title>
     <style>
-        body { margin: 0; background: #000; display: flex; justify-content: center; align-items: center; height: 100vh; font-family: Arial; }
-        canvas { background: #111; border: 2px solid #fff; display: block; }
-        #score { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); color: white; font-size: 28px; font-weight: bold; }
-        h1 { color: white; text-align: center; margin: 10px 0; }
+        body { margin:0; background:#000; display:flex; justify-content:center; align-items:center; height:100vh; flex-direction:column; font-family:Arial; }
+        canvas { background:#111; border:3px solid #fff; }
+        h1 { color:white; margin-bottom:5px; }
+        p { color:#aaa; }
     </style>
 </head>
 <body>
-    <div>
-        <h1>🧱 Brick Game 打磚塊</h1>
-        <div id="score">分數: 0</div>
-        <canvas id="game" width="600" height="500"></canvas>
-        <p style="color: white; text-align: center; margin-top: 15px;">
-            用滑鼠左右移動控制板子<br>
-            ← → 方向鍵也可以控制<br>
-            打掉所有磚塊就勝利！
-        </p>
-    </div>
+    <h1>🧱 打磚塊遊戲</h1>
+    <canvas id="game" width="600" height="500"></canvas>
+    <p>滑鼠移動板子 | 按 R 重新開始</p>
 
     <script>
         const canvas = document.getElementById("game");
         const ctx = canvas.getContext("2d");
-        const scoreElement = document.getElementById("score");
 
-        let paddle = { x: 250, y: 460, width: 100, height: 12, speed: 8 };
-        let ball = { x: 300, y: 300, radius: 9, dx: 4, dy: -4 };
+        // ==================== 音效系統 ====================
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+        function playSound(type) {
+            try {
+                const oscillator = audioContext.createOscillator();
+                const gain = audioContext.createGain();
+                
+                oscillator.connect(gain);
+                gain.connect(audioContext.destination);
+
+                if (type === "hit") {        // 撞板子
+                    oscillator.type = "sine";
+                    oscillator.frequency.setValueAtTime(600, audioContext.currentTime);
+                    gain.gain.value = 0.3;
+                    oscillator.frequency.exponentialRampToValueAtTime(200, audioContext.currentTime + 0.1);
+                } 
+                else if (type === "brick") { // 打磚塊
+                    oscillator.type = "square";
+                    oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
+                    gain.gain.value = 0.2;
+                    oscillator.frequency.exponentialRampToValueAtTime(400, audioContext.currentTime + 0.08);
+                } 
+                else if (type === "over") {  // 遊戲結束
+                    oscillator.type = "sawtooth";
+                    oscillator.frequency.setValueAtTime(400, audioContext.currentTime);
+                    gain.gain.value = 0.4;
+                    oscillator.frequency.exponentialRampToValueAtTime(100, audioContext.currentTime + 0.6);
+                }
+
+                oscillator.start();
+                gain.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.3);
+                oscillator.stop(audioContext.currentTime + 0.4);
+            } catch(e) {}
+        }
+        // ================================================
+
+        let paddle = {x: 250, y: 460, width: 100, height: 12};
+        let ball = {x: 300, y: 300, radius: 9, dx: 4, dy: -4};
         let score = 0;
         let gameOver = false;
         let win = false;
-
         let bricks = [];
-        const brickRows = 5;
-        const brickCols = 8;
-        const brickWidth = 65;
-        const brickHeight = 22;
-        const brickPadding = 10;
-        const brickOffsetTop = 70;
-        const brickOffsetLeft = 35;
 
         function createBricks() {
             bricks = [];
-            for (let r = 0; r < brickRows; r++) {
+            for(let r = 0; r < 5; r++) {
                 bricks[r] = [];
-                for (let c = 0; c < brickCols; c++) {
-                    bricks[r][c] = { x: 0, y: 0, status: 1 };
+                for(let c = 0; c < 8; c++) {
+                    bricks[r][c] = {x: 0, y: 0, status: 1, width: 65, height: 22};
                 }
             }
         }
 
-        function drawPaddle() {
-            ctx.fillStyle = "#00ffff";
-            ctx.fillRect(paddle.x, paddle.y, paddle.width, paddle.height);
-        }
-
-        function drawBall() {
-            ctx.beginPath();
-            ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
-            ctx.fillStyle = "#ffff00";
-            ctx.fill();
-            ctx.closePath();
-        }
-
-        function drawBricks() {
-            for (let r = 0; r < brickRows; r++) {
-                for (let c = 0; c < brickCols; c++) {
-                    if (bricks[r][c].status === 1) {
-                        let brickX = c * (brickWidth + brickPadding) + brickOffsetLeft;
-                        let brickY = r * (brickHeight + brickPadding) + brickOffsetTop;
-                        bricks[r][c].x = brickX;
-                        bricks[r][c].y = brickY;
-                        ctx.fillStyle = `hsl(${r * 45 + 200}, 90%, 65%)`;
-                        ctx.fillRect(brickX, brickY, brickWidth, brickHeight);
-                    }
-                }
-            }
-        }
-
-        function collisionDetection() {
-            for (let r = 0; r < brickRows; r++) {
-                for (let c = 0; c < brickCols; c++) {
-                    let b = bricks[r][c];
-                    if (b.status === 1) {
-                        if (ball.x > b.x && ball.x < b.x + brickWidth && 
-                            ball.y > b.y && ball.y < b.y + brickHeight) {
-                            ball.dy = -ball.dy;
-                            b.status = 0;
-                            score += 10;
-                            scoreElement.textContent = "分數: " + score;
-                        }
-                    }
-                }
-            }
+        function resetGame() {
+            paddle.x = 250;
+            ball.x = 300; ball.y = 300; ball.dx = 4; ball.dy = -4;
+            score = 0;
+            gameOver = false;
+            win = false;
+            createBricks();
         }
 
         function draw() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            
-            drawBricks();
-            drawPaddle();
-            drawBall();
-            collisionDetection();
+            ctx.clearRect(0, 0, 600, 500);
+
+            // 磚塊
+            for(let r = 0; r < 5; r++) {
+                for(let c = 0; c < 8; c++) {
+                    let b = bricks[r][c];
+                    if(b.status === 1) {
+                        b.x = c * 75 + 30;
+                        b.y = r * 35 + 60;
+                        ctx.fillStyle = "#ff00ff";
+                        ctx.fillRect(b.x, b.y, b.width, b.height);
+                    }
+                }
+            }
+
+            // 板子
+            ctx.fillStyle = "#00ffff";
+            ctx.fillRect(paddle.x, paddle.y, paddle.width, paddle.height);
+
+            // 球
+            ctx.beginPath();
+            ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI*2);
+            ctx.fillStyle = "#ffff00";
+            ctx.fill();
+
+            // 碰撞磚塊
+            for(let r = 0; r < 5; r++) {
+                for(let c = 0; c < 8; c++) {
+                    let b = bricks[r][c];
+                    if(b.status === 1 && 
+                       ball.x > b.x && ball.x < b.x + b.width && 
+                       ball.y > b.y && ball.y < b.y + b.height) {
+                        ball.dy = -ball.dy;
+                        b.status = 0;
+                        score += 10;
+                        playSound("brick");
+                    }
+                }
+            }
+
+            // 碰撞板子
+            if(ball.y + ball.radius > paddle.y && ball.y - ball.radius < paddle.y + paddle.height &&
+               ball.x > paddle.x && ball.x < paddle.x + paddle.width) {
+                ball.dy = -Math.abs(ball.dy) - 0.2;
+                playSound("hit");
+            }
 
             ball.x += ball.dx;
             ball.y += ball.dy;
 
-            if (ball.x + ball.radius > canvas.width || ball.x - ball.radius < 0) ball.dx = -ball.dx;
-            if (ball.y - ball.radius < 0) ball.dy = -ball.dy;
-
-            if (ball.y + ball.radius > paddle.y && ball.y - ball.radius < paddle.y + paddle.height &&
-                ball.x > paddle.x && ball.x < paddle.x + paddle.width) {
-                ball.dy = -Math.abs(ball.dy) - 0.3;
+            if(ball.x + ball.radius > 600 || ball.x - ball.radius < 0) ball.dx = -ball.dx;
+            if(ball.y - ball.radius < 0) ball.dy = -ball.dy;
+            if(ball.y + ball.radius > 500) {
+                gameOver = true;
+                playSound("over");
             }
 
-            if (ball.y + ball.radius > canvas.height) gameOver = true;
-            if (score >= brickRows * brickCols * 10) win = true;
+            // 勝利判斷
+            let allDestroyed = bricks.every(row => row.every(b => b.status === 0));
+            if(allDestroyed) win = true;
 
-            if (!gameOver && !win) {
+            if(!gameOver && !win) {
                 requestAnimationFrame(draw);
             } else {
-                ctx.fillStyle = "rgba(0,0,0,0.8)";
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
-                ctx.font = "bold 48px Arial";
-                ctx.fillStyle = win ? "#00ff00" : "#ff0000";
+                ctx.fillStyle = "rgba(0,0,0,0.85)";
+                ctx.fillRect(0, 0, 600, 500);
+                ctx.font = "40px Arial";
+                ctx.fillStyle = win ? "#0f0" : "#f00";
                 ctx.textAlign = "center";
-                ctx.fillText(win ? "🎉 恭喜勝利！" : "💥 遊戲結束", canvas.width/2, canvas.height/2);
+                ctx.fillText(win ? "🎉 恭喜勝利！" : "💥 遊戲結束", 300, 220);
+                ctx.font = "24px Arial";
+                ctx.fillStyle = "#fff";
+                ctx.fillText("按 R 重新開始", 300, 280);
             }
         }
 
-        // 滑鼠控制
         canvas.addEventListener("mousemove", (e) => {
             const rect = canvas.getBoundingClientRect();
-            paddle.x = e.clientX - rect.left - paddle.width / 2;
-            if (paddle.x < 0) paddle.x = 0;
-            if (paddle.x > canvas.width - paddle.width) paddle.x = canvas.width - paddle.width;
+            paddle.x = e.clientX - rect.left - 50;
+            if(paddle.x < 0) paddle.x = 0;
+            if(paddle.x > 500) paddle.x = 500;
         });
 
-        createBricks();
+        document.addEventListener("keydown", (e) => {
+            if(e.key.toLowerCase() === "r") {
+                resetGame();
+                draw();
+            }
+        });
+
+        // 第一次點擊畫面才啟用音效（瀏覽器要求）
+        canvas.addEventListener("click", () => {
+            if (audioContext.state === "suspended") audioContext.resume();
+        }, {once: true});
+
+        resetGame();
         draw();
     </script>
 </body>
